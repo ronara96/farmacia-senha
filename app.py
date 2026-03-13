@@ -1,28 +1,156 @@
-# 1. ESTAS LINHAS DEVEM SER AS PRIMEIRAS DO ARQUIVO
 import eventlet
-eventlet.monkey_patch()
+eventlet.monkey_patch()  # FIX 1: Essencial para o SocketIO no Render
 
-from flask import Flask, render_template
-from flask_socketio import SocketIO
+from flask import Flask, render_template_string
+from flask_socketio import SocketIO, emit
 
-# 2. CONFIGURAÇÃO DO APP
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'secret!' # Você pode mudar para uma senha sua
+app.config['SECRET_KEY'] = 'senha-secreta'
+# FIX 2: Adicionado cors_allowed_origins para o HTTPS não bloquear as senhas
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-# 3. SUAS ROTAS (EXEMPLO)
+# Banco de dados temporário em memória
+fila = {"normal": [], "preferencial": []}
+contadores = {"normal": 1, "preferencial": 1}
+
+def imprimir_senha_termica(senha, tipo):
+    # No servidor Render, isso apenas imprimirá no log (Console)
+    print(f"\n[IMPRESSORA TÉRMICA] Imprimindo: {senha} ({tipo})\n")
+
+# ==========================================
+# TELAS (HTML) - Mantendo seu código original
+# ==========================================
+
+HTML_TOTEM = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Retirar Senha</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body { text-align: center; font-family: Arial; padding-top: 50px; }
+        button { font-size: 30px; padding: 30px; margin: 20px; cursor: pointer; border-radius: 10px; }
+        .btn-n { background-color: #4CAF50; color: white; }
+        .btn-p { background-color: #2196F3; color: white; }
+    </style>
+</head>
+<body>
+    <h1>Selecione o seu atendimento:</h1>
+    <button class="btn-n" onclick="pedirSenha('normal')">NORMAL</button>
+    <button class="btn-p" onclick="pedirSenha('preferencial')">PREFERENCIAL</button>
+
+    <script>
+        var socket = io();
+        function pedirSenha(tipo) {
+            socket.emit('solicitar_senha', {tipo: tipo});
+            alert('Senha solicitada!');
+        }
+    </script>
+</body>
+</html>
+"""
+
+HTML_PAINEL = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Painel de Chamadas</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body { text-align: center; font-family: Arial; background: #222; color: white; margin-top: 100px;}
+        h1 { font-size: 50px; color: yellow;}
+        #senhaAtual { font-size: 150px; margin: 0; }
+        #tipoAtual { font-size: 40px; }
+    </style>
+</head>
+<body>
+    <h1>SENHA CHAMADA:</h1>
+    <div id="senhaAtual">---</div>
+    <div id="tipoAtual">Aguardando...</div>
+
+    <script>
+        var socket = io();
+        socket.on('chamar_painel', function(data) {
+            document.getElementById('senhaAtual').innerText = data.senha;
+            document.getElementById('tipoAtual').innerText = data.tipo.toUpperCase();
+            // Som de alerta
+            var synth = window.speechSynthesis;
+            var utterThis = new SpeechSynthesisUtterance("Senha " + data.senha);
+            synth.speak(utterThis);
+        });
+    </script>
+</body>
+</html>
+"""
+
+HTML_ATENDENTE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Atendente</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        button { font-size: 20px; padding: 15px; background: #f44336; color: white; cursor:pointer;}
+    </style>
+</head>
+<body>
+    <h1>Painel do Atendente</h1>
+    <button onclick="chamarProximo()">📢 Chamar Próxima Senha</button>
+    <h3>Fila Atual:</h3>
+    <p>Preferencial: <span id="fila-p">0</span> aguardando</p>
+    <p>Normal: <span id="fila-n">0</span> aguardando</p>
+
+    <script>
+        var socket = io();
+        function chamarProximo() {
+            socket.emit('chamar_proximo');
+        }
+        socket.on('atualizar_fila', function(data) {
+            document.getElementById('fila-p').innerText = data.preferencial.length;
+            document.getElementById('fila-n').innerText = data.normal.length;
+        });
+    </script>
+</body>
+</html>
+"""
+
 @app.route('/')
-def index():
-    # Certifique-se de que seus arquivos HTML estão na pasta 'templates'
-    return "Painel da Farmácia Rodando com Sucesso!"
+def totem(): return render_template_string(HTML_TOTEM)
 
-# 4. EVENTOS DO SOCKET (EXEMPLO DE CHAMADA)
-@socketio.on('proxima_senha')
-def handle_senha(data):
-    print(f"Chamando senha: {data}")
-    socketio.emit('exibir_senha', data, broadcast=True)
+@app.route('/painel')
+def painel(): return render_template_string(HTML_PAINEL)
 
-# 5. EXECUÇÃO (IMPORTANTE PARA LOCAL E RENDER)
+@app.route('/atendente')
+def atendente(): return render_template_string(HTML_ATENDENTE)
+
+@socketio.on('solicitar_senha')
+def handle_solicitar_senha(data):
+    tipo = data['tipo']
+    prefixo = 'N' if tipo == 'normal' else 'P'
+    numero_senha = f"{prefixo}-{contadores[tipo]:03d}"
+    contadores[tipo] += 1
+    fila[tipo].append(numero_senha)
+    imprimir_senha_termica(numero_senha, tipo)
+    socketio.emit('atualizar_fila', fila)
+
+@socketio.on('chamar_proximo')
+def handle_chamar_proximo():
+    senha_chamada = None
+    tipo_chamada = ""
+    if len(fila['preferencial']) > 0:
+        senha_chamada = fila['preferencial'].pop(0)
+        tipo_chamada = "Preferencial"
+    elif len(fila['normal']) > 0:
+        senha_chamada = fila['normal'].pop(0)
+        tipo_chamada = "Normal"
+    
+    if senha_chamada:
+        socketio.emit('chamar_painel', {'senha': senha_chamada, 'tipo': tipo_chamada})
+        socketio.emit('atualizar_fila', fila)
+
 if __name__ == '__main__':
-    # O Render usa o Gunicorn, então isso aqui roda mais no seu PC
-    socketio.run(app, debug=True)
+    # FIX 3: Porta dinâmica para o Render
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    socketio.run(app, host='0.0.0.0', port=port)
