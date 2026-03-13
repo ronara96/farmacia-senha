@@ -1,24 +1,19 @@
 import eventlet
-eventlet.monkey_patch()  # FIX 1: Essencial para o SocketIO no Render
+eventlet.monkey_patch()
 
 from flask import Flask, render_template_string
 from flask_socketio import SocketIO, emit
+import os
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'senha-secreta'
-# FIX 2: Adicionado cors_allowed_origins para o HTTPS não bloquear as senhas
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-# Banco de dados temporário em memória
 fila = {"normal": [], "preferencial": []}
 contadores = {"normal": 1, "preferencial": 1}
 
-def imprimir_senha_termica(senha, tipo):
-    # No servidor Render, isso apenas imprimirá no log (Console)
-    print(f"\n[IMPRESSORA TÉRMICA] Imprimindo: {senha} ({tipo})\n")
-
 # ==========================================
-# TELAS (HTML) - Mantendo seu código original
+# TELAS (HTML)
 # ==========================================
 
 HTML_TOTEM = """
@@ -29,7 +24,7 @@ HTML_TOTEM = """
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
         body { text-align: center; font-family: Arial; padding-top: 50px; }
-        button { font-size: 30px; padding: 30px; margin: 20px; cursor: pointer; border-radius: 10px; }
+        button { font-size: 30px; padding: 30px; margin: 20px; cursor: pointer; border-radius: 10px; width: 80%; }
         .btn-n { background-color: #4CAF50; color: white; }
         .btn-p { background-color: #2196F3; color: white; }
     </style>
@@ -57,13 +52,16 @@ HTML_PAINEL = """
     <title>Painel de Chamadas</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
-        body { text-align: center; font-family: Arial; background: #222; color: white; margin-top: 100px;}
+        body { text-align: center; font-family: Arial; background: #222; color: white; margin-top: 50px;}
         h1 { font-size: 50px; color: yellow;}
-        #senhaAtual { font-size: 150px; margin: 0; }
+        #senhaAtual { font-size: 150px; margin: 0; color: #00ff00; }
         #tipoAtual { font-size: 40px; }
+        #btnAtivar { padding: 20px; background: red; color: white; border: none; cursor: pointer; border-radius: 5px; margin-bottom: 20px; }
     </style>
 </head>
 <body>
+    <button id="btnAtivar" onclick="this.style.display='none'">🔊 CLIQUE AQUI PARA ATIVAR O SOM</button>
+
     <h1>SENHA CHAMADA:</h1>
     <div id="senhaAtual">---</div>
     <div id="tipoAtual">Aguardando...</div>
@@ -73,10 +71,12 @@ HTML_PAINEL = """
         socket.on('chamar_painel', function(data) {
             document.getElementById('senhaAtual').innerText = data.senha;
             document.getElementById('tipoAtual').innerText = data.tipo.toUpperCase();
-            // Som de alerta
-            var synth = window.speechSynthesis;
-            var utterThis = new SpeechSynthesisUtterance("Senha " + data.senha);
-            synth.speak(utterThis);
+            
+            // Lógica de Voz corrigida
+            var msg = new SpeechSynthesisUtterance("Senha " + data.senha + ", " + data.tipo);
+            msg.lang = 'pt-BR';
+            window.speechSynthesis.cancel(); // Para o som anterior se houver
+            window.speechSynthesis.speak(msg);
         });
     </script>
 </body>
@@ -131,7 +131,6 @@ def handle_solicitar_senha(data):
     numero_senha = f"{prefixo}-{contadores[tipo]:03d}"
     contadores[tipo] += 1
     fila[tipo].append(numero_senha)
-    imprimir_senha_termica(numero_senha, tipo)
     socketio.emit('atualizar_fila', fila)
 
 @socketio.on('chamar_proximo')
@@ -146,11 +145,9 @@ def handle_chamar_proximo():
         tipo_chamada = "Normal"
     
     if senha_chamada:
-        socketio.emit('chamar_painel', {'senha': senha_chamada, 'tipo': tipo_chamada})
+        socketio.emit('chamar_painel', {'senha': senha_chamada, 'tipo': tipo_chamada}, broadcast=True)
         socketio.emit('atualizar_fila', fila)
 
 if __name__ == '__main__':
-    # FIX 3: Porta dinâmica para o Render
-    import os
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=port)
