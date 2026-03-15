@@ -7,8 +7,10 @@ import os
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'sigaf_farmacia_2026'
+# Mantendo o motor SocketIO estável para o Render
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
+# --- CONFIGURAÇÃO DA FILA (Reinicia no 100) ---
 fila = {"normal": [], "preferencial": []}
 contadores = {"normal": 1, "preferencial": 1}
 ultima_senha = {"senha": "---", "tipo": "Aguardando..."}
@@ -31,14 +33,13 @@ CSS_MODERNO = """
     }
     .btn {
         width: 100%; padding: 1.5rem; margin: 10px 0; border-radius: 1rem; border: none;
-        font-size: 1.25rem; font-weight: 600; cursor: pointer; transition: 0.2s; color: white;
+        font-size: 1.5rem; font-weight: 700; cursor: pointer; transition: 0.2s; color: white;
     }
     .btn:active { transform: scale(0.98); }
     .btn-normal { background: var(--success); box-shadow: 0 4px 0 #059669; }
     .btn-pref { background: var(--primary); box-shadow: 0 4px 0 #1d4ed8; }
     .btn-call { background: var(--warning); box-shadow: 0 4px 0 #d97706; font-size: 1.5rem; }
     
-    /* Estilo TV */
     .tv-bg { background: var(--dark); color: white; }
     .tv-card { background: #1e293b; border: 1px solid #334155; padding: 4rem; border-radius: 3rem; width: 80%; }
     .tv-senha { font-size: 15rem; font-weight: 800; color: var(--success); margin: 0; line-height: 1; }
@@ -46,56 +47,41 @@ CSS_MODERNO = """
 </style>
 """
 
-# --- TELAS ---
-
+# --- TELA PAINEL (TV) ---
 HTML_PAINEL = f"""
 <!DOCTYPE html>
-<html class="tv-bg">
-<head>
-    <title>Painel TV</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    {CSS_MODERNO}
-</head>
+<html class="tv-bg"><head><script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>{CSS_MODERNO}</head>
 <body class="tv-bg">
-    <button onclick="this.style.display='none'" style="position:fixed; top:20px; right:20px; padding:15px; background:var(--danger); color:white; border-radius:10px; border:none; cursor:pointer;">🔊 ATIVAR SOM</button>
+    <button onclick="this.style.display='none'" style="position:fixed; top:20px; right:20px; padding:15px; background:var(--danger); color:white; border-radius:10px; border:none; cursor:pointer; z-index:100;">🔊 ATIVAR SOM</button>
     <div class="tv-card text-center">
         <div style="font-size: 2rem; color: var(--secondary);">SENHA CHAMADA</div>
         <div id="senha" class="tv-senha">---</div>
         <div id="tipo" class="tv-tipo">AGUARDANDO</div>
     </div>
     <script>
-        var socket = io();
-        var ultimaLida = "";
+        var socket = io(); var ultimaLida = "";
         function atualizarTela(data) {{
             if (data.senha !== "---" && data.senha !== ultimaLida) {{
                 document.getElementById('senha').innerText = data.senha;
                 document.getElementById('tipo').innerText = data.tipo;
                 ultimaLida = data.senha;
                 var msg = new SpeechSynthesisUtterance("Senha " + data.senha + ", " + data.tipo);
-                msg.lang = 'pt-BR';
-                window.speechSynthesis.speak(msg);
+                msg.lang = 'pt-BR'; window.speechSynthesis.speak(msg);
             }}
         }}
         socket.on('chamar_painel', atualizarTela);
-        setInterval(async () => {{
-            try {{ let res = await fetch('/api/estado'); let data = await res.json(); atualizarTela(data.senha_atual); }} catch(e) {{}}
-        }}, 3000);
+        setInterval(async () => {{ try {{ let res = await fetch('/api/estado'); let data = await res.json(); atualizarTela(data.senha_atual); }} catch(e) {{}} }}, 3000);
     </script>
-</body>
-</html>
+</body></html>
 """
 
+# --- TELA ATENDENTE ---
 HTML_ATENDENTE = f"""
 <!DOCTYPE html>
-<html>
-<head>
-    <title>Atendente</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    {CSS_MODERNO}
-</head>
+<html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>{CSS_MODERNO}</head>
 <body>
     <div class="container">
-        <h2 style="margin-bottom: 2rem;">Controle de Fila</h2>
+        <h2 style="margin-bottom: 2rem;">Controle de Atendimento</h2>
         <div style="display:flex; gap:20px; margin-bottom: 2rem;">
             <div style="flex:1; background:#f1f5f9; padding:20px; border-radius:1rem;">
                 <small>NORMAL</small>
@@ -116,39 +102,33 @@ HTML_ATENDENTE = f"""
             document.getElementById('n').innerText = data.normal.length;
         }}
         socket.on('atualizar_fila', atualizarFila);
-        setInterval(async () => {{
-            try {{ let res = await fetch('/api/estado'); let data = await res.json(); atualizarFila(data.fila); }} catch(e) {{}}
-        }}, 2000);
+        setInterval(async () => {{ try {{ let res = await fetch('/api/estado'); let data = await res.json(); atualizarFila(data.fila); }} catch(e) {{}} }}, 2000);
     </script>
-</body>
-</html>
+</body></html>
 """
 
+# --- TELA TOTEM (Com aviso para idosos) ---
 HTML_TOTEM = f"""
 <!DOCTYPE html>
-<html>
-<head>
-    <title>Totem</title>
-    {CSS_MODERNO}
-</head>
+<html><head>{CSS_MODERNO}</head>
 <body>
     <div class="container">
         <h1 style="font-weight:800; font-size:2rem; margin-bottom:0.5rem;">FARMÁCIA</h1>
-        <p style="color:var(--secondary); margin-bottom:2.5rem;">Selecione o tipo de atendimento</p>
+        <p style="color:var(--secondary); margin-bottom:2.5rem;">Toque no botão e pegue sua ficha física</p>
         <button class="btn btn-normal" onclick="gerar('normal')">ATENDIMENTO NORMAL</button>
         <button class="btn btn-pref" onclick="gerar('preferencial')">PREFERENCIAL</button>
     </div>
     <script>
         async function gerar(t) {{
-            await fetch('/api/gerar?tipo=' + t);
-            alert('Senha Gerada! Aguarde a chamada no painel.');
+            let res = await fetch('/api/gerar?tipo=' + t);
+            let data = await res.json();
+            alert('SUA SENHA É: ' + data.senha + '\\n\\nPEGUE A FICHA FÍSICA NÚMERO ' + data.numero + ' AO LADO.');
         }}
     </script>
-</body>
-</html>
+</body></html>
 """
 
-# --- LÓGICA (INTOCADA) ---
+# --- LÓGICA DO SERVIDOR ---
 
 @app.route('/')
 def r_totem(): return render_template_string(HTML_TOTEM)
@@ -166,20 +146,33 @@ def api_estado():
 @app.route('/api/gerar')
 def api_gerar():
     t = request.args.get('tipo', 'normal')
-    s = f"{'N' if t == 'normal' else 'P'}-{contadores[t]:03d}"
-    contadores[t] += 1
+    
+    # Pega o número para a ficha física
+    num = contadores[t]
+    prefixo = 'N' if t == 'normal' else 'P'
+    s = f"{prefixo}-{num:02d}"
+    
     fila[t].append(s)
+    
+    # REGRA DE REINICIAR NO 100
+    if contadores[t] >= 100:
+        contadores[t] = 1
+    else:
+        contadores[t] += 1
+        
     socketio.emit('atualizar_fila', fila, broadcast=True)
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "senha": s, "numero": num})
 
 @app.route('/api/chamar')
 def api_chamar():
     senha = None
     tipo = ""
+    # Prioridade para preferencial
     if fila['preferencial']:
         senha = fila['preferencial'].pop(0); tipo = "Preferencial"
     elif fila['normal']:
         senha = fila['normal'].pop(0); tipo = "Normal"
+    
     if senha:
         ultima_senha['senha'] = senha
         ultima_senha['tipo'] = tipo
