@@ -1,50 +1,20 @@
 import eventlet
-eventlet.monkey_patch()
+eventlet.monkey_patch()  # Essencial para o SocketIO no Render
 
 from flask import Flask, render_template_string
 from flask_socketio import SocketIO, emit
 import os
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'senha-secreta'
-# O cors_allowed_origins="*" é o que permite as telas conversarem entre si no Render
+app.config['SECRET_KEY'] = 'sigaf-secret-123'
+# Configuração vital para o Render aceitar as conexões de abas diferentes
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-# Banco de dados temporário (se reiniciar o Render, a fila zera)
+# Banco de dados em memória
 fila = {"normal": [], "preferencial": []}
 contadores = {"normal": 1, "preferencial": 1}
 
-# --- TELA DO TOTEM (Onde o cliente clica) ---
-HTML_TOTEM = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Retirar Senha</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <style>
-        body { text-align: center; font-family: Arial; padding-top: 50px; }
-        button { font-size: 30px; padding: 30px; margin: 20px; cursor: pointer; border-radius: 10px; width: 80%; }
-        .btn-n { background-color: #4CAF50; color: white; }
-        .btn-p { background-color: #2196F3; color: white; }
-    </style>
-</head>
-<body>
-    <h1>Selecione o seu atendimento:</h1>
-    <button class="btn-n" onclick="pedirSenha('normal')">NORMAL</button>
-    <button class="btn-p" onclick="pedirSenha('preferencial')">PREFERENCIAL</button>
-
-    <script>
-        var socket = io();
-        function pedirSenha(tipo) {
-            socket.emit('solicitar_senha', {tipo: tipo});
-            alert('Senha solicitada!');
-        }
-    </script>
-</body>
-</html>
-"""
-
-# --- TELA DO PAINEL (A que fica na TV) ---
+# --- HTML PAINEL (TV) ---
 HTML_PAINEL = """
 <!DOCTYPE html>
 <html>
@@ -52,13 +22,15 @@ HTML_PAINEL = """
     <title>Painel de Chamadas</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
-        body { text-align: center; font-family: Arial; background: #222; color: white; margin-top: 100px;}
+        body { text-align: center; font-family: Arial; background: #222; color: white; margin-top: 50px;}
         h1 { font-size: 50px; color: yellow;}
-        #senhaAtual { font-size: 150px; margin: 0; }
+        #senhaAtual { font-size: 150px; margin: 0; color: #00ff00; }
         #tipoAtual { font-size: 40px; }
+        button { padding: 20px; background: red; color: white; border: none; cursor: pointer; border-radius: 5px; }
     </style>
 </head>
 <body>
+    <button id="btnSom" onclick="this.style.display='none'">🔊 CLIQUE PARA ATIVAR O SOM</button>
     <h1>SENHA CHAMADA:</h1>
     <div id="senhaAtual">---</div>
     <div id="tipoAtual">Aguardando...</div>
@@ -69,17 +41,48 @@ HTML_PAINEL = """
             document.getElementById('senhaAtual').innerText = data.senha;
             document.getElementById('tipoAtual').innerText = data.tipo.toUpperCase();
             
-            // Tentativa original de som (que o navegador costuma bloquear)
-            var synth = window.speechSynthesis;
-            var utterThis = new SpeechSynthesisUtterance("Senha " + data.senha);
-            synth.speak(utterThis);
+            // Voz em Português
+            var msg = new SpeechSynthesisUtterance("Senha " + data.senha + ", " + data.tipo);
+            msg.lang = 'pt-BR';
+            window.speechSynthesis.cancel(); 
+            window.speechSynthesis.speak(msg);
         });
     </script>
 </body>
 </html>
 """
 
-# --- TELA DO ATENDENTE (Onde vê a fila e clica) ---
+# --- HTML TOTEM (BOTÃO DE SENHA) ---
+HTML_TOTEM = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Retirar Senha</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body { text-align: center; font-family: Arial; padding-top: 50px; }
+        button { font-size: 30px; padding: 40px; margin: 20px; cursor: pointer; border-radius: 10px; width: 80%; color: white; border: none; }
+        .btn-n { background-color: #4CAF50; }
+        .btn-p { background-color: #2196F3; }
+    </style>
+</head>
+<body>
+    <h1>Selecione o seu atendimento:</h1>
+    <button class="btn-n" onclick="pedir('normal')">NORMAL</button>
+    <button class="btn-p" onclick="pedir('preferencial')">PREFERENCIAL</button>
+
+    <script>
+        var socket = io();
+        function pedir(tipo) {
+            socket.emit('solicitar_senha', {tipo: tipo});
+            alert('Senha solicitada!');
+        }
+    </script>
+</body>
+</html>
+"""
+
+# --- HTML ATENDENTE (CHAMAR E VER QUANTIDADE) ---
 HTML_ATENDENTE = """
 <!DOCTYPE html>
 <html>
@@ -88,8 +91,9 @@ HTML_ATENDENTE = """
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
         body { font-family: Arial; padding: 20px; text-align: center; }
-        button { font-size: 20px; padding: 15px; background: #f44336; color: white; cursor:pointer; width: 100%; max-width: 300px; }
-        .info { margin: 20px; font-size: 18px; }
+        button { font-size: 20px; padding: 15px; background: #f44336; color: white; cursor:pointer; width: 100%; max-width: 300px; border: none; border-radius: 10px; }
+        .info { margin: 20px; font-size: 22px; }
+        span { font-weight: bold; color: #e67e22; }
     </style>
 </head>
 <body>
@@ -98,21 +102,28 @@ HTML_ATENDENTE = """
         <p>Preferencial: <span id="fila-p">0</span> aguardando</p>
         <p>Normal: <span id="fila-n">0</span> aguardando</p>
     </div>
-    <button onclick="chamarProximo()">📢 Chamar Próxima Senha</button>
+    <button onclick="chamar()">📢 Chamar Próxima Senha</button>
 
     <script>
         var socket = io();
-        function chamarProximo() {
+        function chamar() {
             socket.emit('chamar_proximo');
         }
+        // Atualiza os contadores em tempo real
         socket.on('atualizar_fila', function(data) {
             document.getElementById('fila-p').innerText = data.preferencial.length;
             document.getElementById('fila-n').innerText = data.normal.length;
+        });
+        // Pede os números atuais assim que abre a página
+        socket.on('connect', function() {
+            socket.emit('pedir_atualizacao');
         });
     </script>
 </body>
 </html>
 """
+
+# --- LÓGICA DO SERVIDOR ---
 
 @app.route('/')
 def totem(): return render_template_string(HTML_TOTEM)
@@ -130,7 +141,7 @@ def handle_solicitar_senha(data):
     numero_senha = f"{prefixo}-{contadores[tipo]:03d}"
     contadores[tipo] += 1
     fila[tipo].append(numero_senha)
-    # Avisa todo mundo que a fila aumentou
+    # Broadcast=True faz com que o Atendente veja o número mudar na hora
     socketio.emit('atualizar_fila', fila, broadcast=True)
 
 @socketio.on('chamar_proximo')
@@ -138,7 +149,6 @@ def handle_chamar_proximo():
     senha_chamada = None
     tipo_chamada = ""
     
-    # Lógica de prioridade original
     if len(fila['preferencial']) > 0:
         senha_chamada = fila['preferencial'].pop(0)
         tipo_chamada = "Preferencial"
@@ -147,10 +157,13 @@ def handle_chamar_proximo():
         tipo_chamada = "Normal"
     
     if senha_chamada:
-        # Envia a senha para o Painel da TV
+        # Avisa o painel e atualiza a contagem de quem sobrou na fila
         socketio.emit('chamar_painel', {'senha': senha_chamada, 'tipo': tipo_chamada}, broadcast=True)
-        # Atualiza os contadores na tela do atendente
         socketio.emit('atualizar_fila', fila, broadcast=True)
+
+@socketio.on('pedir_atualizacao')
+def handle_pedir_atualizacao():
+    emit('atualizar_fila', fila)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
