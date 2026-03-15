@@ -1,13 +1,12 @@
 import eventlet
-eventlet.monkey_patch()  # Essencial para o SocketIO no Render
+eventlet.monkey_patch()
 
 from flask import Flask, render_template_string
 from flask_socketio import SocketIO, emit
 import os
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'sigaf-secret-123'
-# Configuração vital para o Render aceitar as conexões de abas diferentes
+app.config['SECRET_KEY'] = 'sigaf-secret'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # Banco de dados em memória
@@ -26,7 +25,7 @@ HTML_PAINEL = """
         h1 { font-size: 50px; color: yellow;}
         #senhaAtual { font-size: 150px; margin: 0; color: #00ff00; }
         #tipoAtual { font-size: 40px; }
-        button { padding: 20px; background: red; color: white; border: none; cursor: pointer; border-radius: 5px; }
+        #btnSom { padding: 20px; background: red; color: white; border: none; cursor: pointer; border-radius: 5px; }
     </style>
 </head>
 <body>
@@ -41,7 +40,6 @@ HTML_PAINEL = """
             document.getElementById('senhaAtual').innerText = data.senha;
             document.getElementById('tipoAtual').innerText = data.tipo.toUpperCase();
             
-            // Voz em Português
             var msg = new SpeechSynthesisUtterance("Senha " + data.senha + ", " + data.tipo);
             msg.lang = 'pt-BR';
             window.speechSynthesis.cancel(); 
@@ -82,7 +80,7 @@ HTML_TOTEM = """
 </html>
 """
 
-# --- HTML ATENDENTE (CHAMAR E VER QUANTIDADE) ---
+# --- HTML ATENDENTE (Onde o botão de chamar FICA) ---
 HTML_ATENDENTE = """
 <!DOCTYPE html>
 <html>
@@ -91,8 +89,8 @@ HTML_ATENDENTE = """
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
         body { font-family: Arial; padding: 20px; text-align: center; }
-        button { font-size: 20px; padding: 15px; background: #f44336; color: white; cursor:pointer; width: 100%; max-width: 300px; border: none; border-radius: 10px; }
-        .info { margin: 20px; font-size: 22px; }
+        button { font-size: 25px; padding: 20px; background: #f44336; color: white; cursor:pointer; width: 100%; max-width: 400px; border: none; border-radius: 10px; font-weight: bold;}
+        .info { margin: 20px; font-size: 24px; }
         span { font-weight: bold; color: #e67e22; }
     </style>
 </head>
@@ -102,19 +100,21 @@ HTML_ATENDENTE = """
         <p>Preferencial: <span id="fila-p">0</span> aguardando</p>
         <p>Normal: <span id="fila-n">0</span> aguardando</p>
     </div>
-    <button onclick="chamar()">📢 Chamar Próxima Senha</button>
+    <button onclick="chamar_agora()">📢 Chamar Próxima Senha</button>
 
     <script>
         var socket = io();
-        function chamar() {
+        
+        function chamar_agora() {
+            console.log("Botão clicado, enviando sinal...");
             socket.emit('chamar_proximo');
         }
-        // Atualiza os contadores em tempo real
+
         socket.on('atualizar_fila', function(data) {
             document.getElementById('fila-p').innerText = data.preferencial.length;
             document.getElementById('fila-n').innerText = data.normal.length;
         });
-        // Pede os números atuais assim que abre a página
+
         socket.on('connect', function() {
             socket.emit('pedir_atualizacao');
         });
@@ -141,7 +141,6 @@ def handle_solicitar_senha(data):
     numero_senha = f"{prefixo}-{contadores[tipo]:03d}"
     contadores[tipo] += 1
     fila[tipo].append(numero_senha)
-    # Broadcast=True faz com que o Atendente veja o número mudar na hora
     socketio.emit('atualizar_fila', fila, broadcast=True)
 
 @socketio.on('chamar_proximo')
@@ -149,6 +148,7 @@ def handle_chamar_proximo():
     senha_chamada = None
     tipo_chamada = ""
     
+    # Prioridade Preferencial
     if len(fila['preferencial']) > 0:
         senha_chamada = fila['preferencial'].pop(0)
         tipo_chamada = "Preferencial"
@@ -157,7 +157,7 @@ def handle_chamar_proximo():
         tipo_chamada = "Normal"
     
     if senha_chamada:
-        # Avisa o painel e atualiza a contagem de quem sobrou na fila
+        # Envia para TODOS os painéis e atualiza as filas
         socketio.emit('chamar_painel', {'senha': senha_chamada, 'tipo': tipo_chamada}, broadcast=True)
         socketio.emit('atualizar_fila', fila, broadcast=True)
 
