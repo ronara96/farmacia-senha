@@ -148,7 +148,6 @@ def handle_chamar_proximo():
     senha_chamada = None
     tipo_chamada = ""
     
-    # Prioridade Preferencial
     if len(fila['preferencial']) > 0:
         senha_chamada = fila['preferencial'].pop(0)
         tipo_chamada = "Preferencial"
@@ -157,9 +156,10 @@ def handle_chamar_proximo():
         tipo_chamada = "Normal"
     
     if senha_chamada:
-        # Envia para TODOS os painéis e atualiza as filas
+        # IMPORTANTE: Usar socketio.emit em vez de apenas emit
         socketio.emit('chamar_painel', {'senha': senha_chamada, 'tipo': tipo_chamada}, broadcast=True)
         socketio.emit('atualizar_fila', fila, broadcast=True)
+        print(f"Senha {senha_chamada} enviada para o painel!")
 
 @socketio.on('pedir_atualizacao')
 def handle_pedir_atualizacao():
