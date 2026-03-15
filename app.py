@@ -1,19 +1,18 @@
 import eventlet
 eventlet.monkey_patch()
 
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, jsonify
 from flask_socketio import SocketIO
 import os
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'sigaf-secret-key'
-# Adicionei o logger para você conseguir ver o que acontece nos logs do Render
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', logger=True, engineio_logger=True)
+app.config['SECRET_KEY'] = 'sigaf-123'
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 fila = {"normal": [], "preferencial": []}
 contadores = {"normal": 1, "preferencial": 1}
 
-# --- HTML PAINEL ---
+# --- HTML PAINEL (TV) ---
 HTML_PAINEL = """
 <!DOCTYPE html>
 <html>
@@ -21,27 +20,22 @@ HTML_PAINEL = """
     <title>Painel</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
-<body style="background:#000; color:#0f0; text-align:center; font-family:sans-serif; padding-top:100px;">
+<body style="background:#000; color:#0f0; text-align:center; font-family:sans-serif;">
     <h1>SENHA:</h1>
-    <div id="senha" style="font-size:200px;">---</div>
-    <div id="tipo" style="font-size:50px; color:#fff;">AGUARDANDO...</div>
+    <div id="senha" style="font-size:150px;">---</div>
     <script>
         var socket = io();
         socket.on('chamar_painel', function(data) {
             document.getElementById('senha').innerText = data.senha;
-            document.getElementById('tipo').innerText = data.tipo;
-            try {
-                var msg = new SpeechSynthesisUtterance("Senha " + data.senha);
-                msg.lang = 'pt-BR';
-                window.speechSynthesis.speak(msg);
-            } catch(e) {}
+            var msg = new SpeechSynthesisUtterance("Senha " + data.senha);
+            window.speechSynthesis.speak(msg);
         });
     </script>
 </body>
 </html>
 """
 
-# --- HTML ATENDENTE ---
+# --- HTML ATENDENTE (MUDANÇA TOTAL NO BOTÃO) ---
 HTML_ATENDENTE = """
 <!DOCTYPE html>
 <html>
@@ -50,29 +44,24 @@ HTML_ATENDENTE = """
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
 <body style="text-align:center; font-family:sans-serif; padding-top:50px;">
-    <h2>Senhas Aguardando</h2>
-    <div style="font-size:25px;">Preferencial: <span id="p">0</span> | Normal: <span id="n">0</span></div>
+    <h2>Aguardando: <span id="p">0</span> P | <span id="n">0</span> N</h2>
     <br>
-    <button id="btnChamar" style="font-size:40px; padding:30px; background:orange; color:white; border:none; border-radius:15px; cursor:pointer;">
+    <button onclick="chamarViaHttp()" style="font-size:40px; padding:30px; background:orange; cursor:pointer;">
         📢 CHAMAR PRÓXIMO
     </button>
     
     <script>
         var socket = io();
         
-        // Forma mais segura de capturar o clique no navegador
-        document.getElementById('btnChamar').addEventListener('click', function() {
-            console.log("Botão pressionado!");
-            socket.emit('proximo_evento');
-        });
+        function chamarViaHttp() {
+            console.log("Chamando via HTTP...");
+            fetch('/api/chamar') // Envia um sinal direto para o servidor
+            .then(response => console.log("Sinal enviado!"));
+        }
 
         socket.on('atualizar_fila', function(data) {
             document.getElementById('p').innerText = data.preferencial.length;
             document.getElementById('n').innerText = data.normal.length;
-        });
-
-        socket.on('connect', function() {
-            socket.emit('solicitar_status');
         });
     </script>
 </body>
@@ -83,8 +72,8 @@ HTML_ATENDENTE = """
 
 @app.route('/')
 def r_totem(): return render_template_string("""
-    <button onclick="io().emit('solicitar_senha', {tipo:'normal'})" style="padding:50px; font-size:40px; background:green; color:white;">NORMAL</button>
-    <button onclick="io().emit('solicitar_senha', {tipo:'preferencial'})" style="padding:50px; font-size:40px; background:blue; color:white;">PREFERENCIAL</button>
+    <button onclick="io().emit('solicitar_senha', {tipo:'normal'})" style="padding:40px; font-size:30px;">NORMAL</button>
+    <button onclick="io().emit('solicitar_senha', {tipo:'preferencial'})" style="padding:40px; font-size:30px;">PREFERENCIAL</button>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 """)
 
@@ -94,6 +83,20 @@ def r_painel(): return render_template_string(HTML_PAINEL)
 @app.route('/atendente')
 def r_atendente(): return render_template_string(HTML_ATENDENTE)
 
+# NOVA ROTA DE EMERGÊNCIA PARA O BOTÃO
+@app.route('/api/chamar')
+def api_chamar():
+    senha = None
+    if fila['preferencial']:
+        senha = fila['preferencial'].pop(0)
+    elif fila['normal']:
+        senha = fila['normal'].pop(0)
+    
+    if senha:
+        socketio.emit('chamar_painel', {'senha': senha}, broadcast=True)
+        socketio.emit('atualizar_fila', fila, broadcast=True)
+    return jsonify({"status": "ok"})
+
 @socketio.on('solicitar_senha')
 def handle_solicitar(data):
     t = data['tipo']
@@ -101,26 +104,6 @@ def handle_solicitar(data):
     contadores[t] += 1
     fila[t].append(s)
     socketio.emit('atualizar_fila', fila, broadcast=True)
-
-@socketio.on('proximo_evento')
-def handle_proximo():
-    senha = None
-    tipo = ""
-    if fila['preferencial']:
-        senha = fila['preferencial'].pop(0)
-        tipo = "Preferencial"
-    elif fila['normal']:
-        senha = fila['normal'].pop(0)
-        tipo = "Normal"
-    
-    if senha:
-        # Envia para todos
-        socketio.emit('chamar_painel', {'senha': senha, 'tipo': tipo}, broadcast=True)
-        socketio.emit('atualizar_fila', fila, broadcast=True)
-
-@socketio.on('solicitar_status')
-def handle_status():
-    socketio.emit('atualizar_fila', fila)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
