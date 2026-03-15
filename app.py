@@ -1,6 +1,5 @@
-# 1. Preparação do servidor (Gevent é mais estável que Eventlet)
-from gevent import monkey
-monkey.patch_all()
+import eventlet
+eventlet.monkey_patch()
 
 from flask import Flask, render_template_string, jsonify, request
 from flask_socketio import SocketIO
@@ -8,34 +7,27 @@ import os
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'sigaf_farmacia_2026'
-# Configuração reforçada para evitar quedas
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent', ping_timeout=60)
+# Usando eventlet novamente, que é o que o Render já instalou com sucesso
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-# Banco de dados temporário
 fila = {"normal": [], "preferencial": []}
 contadores = {"normal": 1, "preferencial": 1}
 ultima_senha = {"senha": "---", "tipo": "Aguardando..."}
 
-# --- HTML DAS TELAS ---
+# --- HTML (Com o "F5 Automático" que te prometi) ---
 
-# Painel (TV) com Verificação Automática
 HTML_PAINEL = """
 <!DOCTYPE html>
 <html>
 <head>
     <title>Painel TV</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <style>
-        body { background: #000; color: #0f0; font-family: sans-serif; text-align: center; padding-top: 100px; }
-        #senha { font-size: 200px; font-weight: bold; }
-        #tipo { font-size: 50px; color: #fff; }
-    </style>
 </head>
-<body>
+<body style="background:#000; color:#0f0; text-align:center; font-family:sans-serif; padding-top:100px;">
     <button onclick="this.style.display='none'" style="padding:20px;">🔊 ATIVAR SOM</button>
-    <h1>SENHA:</h1>
-    <div id="senha">---</div>
-    <div id="tipo">AGUARDANDO...</div>
+    <h1 style="font-size:50px;">SENHA:</h1>
+    <div id="senha" style="font-size:200px; font-weight:bold;">---</div>
+    <div id="tipo" style="font-size:50px; color:#fff;">AGUARDANDO...</div>
 
     <script>
         var socket = io();
@@ -50,10 +42,7 @@ HTML_PAINEL = """
                 window.speechSynthesis.speak(msg);
             }
         }
-
         socket.on('chamar_painel', atualizarTela);
-
-        // Verificação de segurança a cada 3 segundos (caso o socket caia)
         setInterval(async () => {
             try {
                 let res = await fetch('/api/estado');
@@ -66,41 +55,27 @@ HTML_PAINEL = """
 </html>
 """
 
-# Atendente com Verificação Automática
 HTML_ATENDENTE = """
 <!DOCTYPE html>
 <html>
 <head>
     <title>Atendente</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <style>
-        body { font-family: sans-serif; text-align: center; padding-top: 50px; background: #f0f0f0; }
-        .caixa { background: white; padding: 30px; display: inline-block; border-radius: 20px; }
-        button { font-size: 30px; padding: 20px; background: orange; color: white; border: none; cursor: pointer; border-radius: 10px; }
-    </style>
 </head>
-<body>
-    <div class="caixa">
+<body style="text-align:center; font-family:sans-serif; padding-top:50px; background:#f0f0f0;">
+    <div style="background:white; padding:30px; display:inline-block; border-radius:20px;">
         <h2>FILA DE ESPERA</h2>
         <p style="font-size:25px;">Preferencial: <span id="p">0</span> | Normal: <span id="n">0</span></p>
-        <button onclick="chamar()">📢 CHAMAR PRÓXIMO</button>
+        <button onclick="chamar()" style="font-size:30px; padding:20px; background:orange; color:white; border:none; border-radius:10px; cursor:pointer;">📢 CHAMAR PRÓXIMO</button>
     </div>
-
     <script>
         var socket = io();
-        
-        async function chamar() {
-            await fetch('/api/chamar');
-        }
-
+        async function chamar() { await fetch('/api/chamar'); }
         function atualizarFila(data) {
             document.getElementById('p').innerText = data.preferencial.length;
             document.getElementById('n').innerText = data.normal.length;
         }
-
         socket.on('atualizar_fila', atualizarFila);
-
-        // Verificação automática (NÃO PRECISA MAIS DE F5)
         setInterval(async () => {
             try {
                 let res = await fetch('/api/estado');
@@ -113,11 +88,11 @@ HTML_ATENDENTE = """
 </html>
 """
 
-# Totem
 HTML_TOTEM = """
 <!DOCTYPE html>
 <html>
 <body style="text-align:center; padding-top:100px;">
+    <h1>Retirar Senha</h1>
     <button onclick="gerar('normal')" style="font-size:40px; background:green; color:white; padding:40px; width:80%;">NORMAL</button><br><br>
     <button onclick="gerar('preferencial')" style="font-size:40px; background:blue; color:white; padding:40px; width:80%;">PREFERENCIAL</button>
     <script>
@@ -164,7 +139,6 @@ def api_chamar():
     elif fila['normal']:
         senha = fila['normal'].pop(0)
         tipo = "Normal"
-    
     if senha:
         ultima_senha['senha'] = senha
         ultima_senha['tipo'] = tipo
