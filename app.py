@@ -9,102 +9,105 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'sigaf_farmacia_2026'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-# --- CONFIGURAÇÃO ---
+# --- CONFIGURAÇÃO DE DADOS ---
 fila = {"normal": [], "preferencial": []}
 contadores = {"normal": 1, "preferencial": 1}
 ultima_senha = {"senha": "---", "tipo": "Aguardando..."}
 
-CSS_MODERNO = """
+# --- ESTILO CSS ÚNICO ---
+CSS = """
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-    :root { --primary: #2563eb; --success: #10b981; --dark: #0f172a; }
+    :root { --primary: #2563eb; --success: #10b981; --dark: #0f172a; --danger: #ef4444; }
     body { font-family: 'Inter', sans-serif; margin: 0; background: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
     .container { background: white; padding: 3rem; border-radius: 2rem; box-shadow: 0 20px 25px rgba(0,0,0,0.1); text-align: center; width: 90%; max-width: 500px; }
-    .btn { width: 100%; padding: 1.5rem; margin: 10px 0; border-radius: 1rem; border: none; font-size: 1.5rem; font-weight: 700; cursor: pointer; color: white; transition: 0.2s; }
-    .btn-normal { background: var(--success); box-shadow: 0 4px 0 #059669; }
-    .btn-pref { background: var(--primary); box-shadow: 0 4px 0 #1d4ed8; }
-    .btn:active { transform: scale(0.95); }
-    
-    /* Estilo TV */
+    .btn { width: 100%; padding: 1.5rem; margin: 10px 0; border-radius: 1rem; border: none; font-size: 1.6rem; font-weight: 800; cursor: pointer; color: white; transition: 0.2s; }
+    .btn-normal { background: var(--success); box-shadow: 0 5px 0 #059669; }
+    .btn-pref { background: var(--primary); box-shadow: 0 5px 0 #1d4ed8; }
+    .btn:active { transform: translateY(3px); box-shadow: none; }
     .tv-bg { background: var(--dark); color: white; }
     .tv-card { background: #1e293b; padding: 4rem; border-radius: 3rem; border: 1px solid #334155; }
-    .tv-senha { font-size: 15rem; font-weight: 800; color: var(--success); margin: 0; }
+    .tv-senha { font-size: 15rem; font-weight: 800; color: var(--success); margin: 0; line-height: 1; }
 </style>
 """
 
-# --- HTML TOTEM (COM COMANDO DE IMPRESSÃO DIRETA) ---
+# --- HTML TOTEM (IMPRESSÃO DIRETA) ---
 HTML_TOTEM = """
 <!DOCTYPE html>
 <html>
-<head>
-    <title>Totem</title>
-    {{ css|safe }}
-</head>
+<head><title>Totem de Senhas</title>""" + CSS + """</head>
 <body>
     <div class="container">
         <h1 style="font-weight:800; font-size:2.5rem; margin-bottom:0.5rem;">FARMÁCIA</h1>
-        <p style="color:#64748b; margin-bottom:2.5rem;">Toque abaixo para retirar sua senha</p>
+        <p style="color:#64748b; margin-bottom:2.5rem; font-size:1.2rem;">Selecione seu atendimento</p>
         <button class="btn btn-normal" onclick="gerar('normal')">ATENDIMENTO NORMAL</button>
         <button class="btn btn-pref" onclick="gerar('preferencial')">PREFERENCIAL</button>
+        <p id="status" style="margin-top:20px; color:var(--success); font-weight:600; display:none;">Imprimindo senha...</p>
     </div>
 
-    <iframe id="imprimir_frame" style="display:none;"></iframe>
+    <iframe id="print_frame" style="display:none;"></iframe>
 
     <script>
         async function gerar(tipo) {
-            const res = await fetch('/api/gerar?tipo=' + tipo);
-            const data = await res.json();
-            
-            const frame = document.getElementById('imprimir_frame');
-            const doc = frame.contentWindow.document;
+            const statusMsg = document.getElementById('status');
+            statusMsg.style.display = 'block';
 
-            // Criando o ticket para a impressora térmica
-            const ticket = `
-                <html>
-                <body style="text-align:center; font-family:Arial; margin:0; padding:10px;">
-                    <h2 style="margin:0; font-size:20px;">FARMÁCIA</h2>
-                    <p style="margin:5px 0;">-----------------------</p>
-                    <p style="font-size:14px; margin:0;">SENHA</p>
-                    <h1 style="font-size:60px; margin:10px 0;">${data.senha}</h1>
-                    <p style="font-size:16px; font-weight:bold; margin:0;">${data.tipo_extenso}</p>
-                    <p style="margin:5px 0;">-----------------------</p>
-                    <p style="font-size:10px;">${new Date().toLocaleString('pt-BR')}</p>
-                </body>
-                </html>
-            `;
+            try {
+                const res = await fetch('/api/gerar?tipo=' + tipo);
+                const data = await res.json();
+                
+                const frame = document.getElementById('print_frame');
+                const doc = frame.contentWindow.document;
 
-            doc.open();
-            doc.write(ticket);
-            doc.close();
+                const ticket = `
+                    <html>
+                    <body style="text-align:center; font-family:Arial; margin:0; padding:10px;">
+                        <h2 style="margin:0; font-size:18px;">FARMÁCIA</h2>
+                        <p>----------------------------</p>
+                        <p style="font-size:14px; margin:0;">SUA SENHA É</p>
+                        <h1 style="font-size:55px; margin:10px 0;">${data.senha}</h1>
+                        <p style="font-size:16px; font-weight:bold;">${data.tipo_extenso}</p>
+                        <p>----------------------------</p>
+                        <p style="font-size:10px;">${new Date().toLocaleString('pt-BR')}</p>
+                    </body>
+                    </html>
+                `;
 
-            // O comando mágico que abre o "Ctrl + P" para o frame invisível
-            setTimeout(() => {
-                frame.contentWindow.focus();
-                frame.contentWindow.print();
-            }, 500);
+                doc.open();
+                doc.write(ticket);
+                doc.close();
 
-            // Alerta visual de confirmação na tela
-            alert("SENHA GERADA: " + data.senha + "\\n\\nImprimindo ticket...");
+                // Chama a impressão (Ctrl+P) sem alertas para não travar
+                setTimeout(() => {
+                    frame.contentWindow.focus();
+                    frame.contentWindow.print();
+                    statusMsg.style.display = 'none';
+                }, 300);
+
+            } catch (err) {
+                alert("Erro de conexão. Tente novamente.");
+                statusMsg.style.display = 'none';
+            }
         }
     </script>
 </body>
 </html>
 """
 
-# --- RESTANTE DO CÓDIGO (PAINEL E ATENDENTE) ---
+# --- HTML PAINEL (TV) ---
 HTML_PAINEL = """
 <!DOCTYPE html>
-<html class="tv-bg"><head><script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>{{ css|safe }}</head>
+<html class="tv-bg"><head><script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>""" + CSS + """</head>
 <body class="tv-bg">
-    <button onclick="this.style.display='none'" style="position:fixed; top:20px; right:20px; padding:15px; background:red; color:white; border-radius:10px; border:none; cursor:pointer;">🔊 ATIVAR SOM</button>
+    <button onclick="this.style.display='none'" style="position:fixed; top:20px; right:20px; padding:15px; background:var(--danger); color:white; border-radius:10px; border:none; cursor:pointer; z-index:999;">🔊 ATIVAR SOM</button>
     <div class="tv-card text-center">
-        <div style="font-size: 2rem; color: #64748b;">SENHA CHAMADA</div>
+        <div style="font-size: 2rem; color: #64748b; margin-bottom:1rem;">SENHA CHAMADA</div>
         <div id="senha" class="tv-senha">---</div>
-        <div id="tipo" style="font-size:3rem; color:#38bdf8;">AGUARDANDO</div>
+        <div id="tipo" style="font-size:3.5rem; color:#38bdf8; margin-top:1rem; font-weight:600;">AGUARDANDO</div>
     </div>
     <script>
         var socket = io(); var ultimaLida = "";
-        function atualizarTela(data) {
+        function atualizar(data) {
             if (data.senha !== "---" && data.senha !== ultimaLida) {
                 document.getElementById('senha').innerText = data.senha;
                 document.getElementById('tipo').innerText = data.tipo;
@@ -113,40 +116,43 @@ HTML_PAINEL = """
                 msg.lang = 'pt-BR'; window.speechSynthesis.speak(msg);
             }
         }
-        socket.on('chamar_painel', atualizarTela);
-        setInterval(async () => { try { let res = await fetch('/api/estado'); let data = await res.json(); atualizarTela(data.senha_atual); } catch(e) {} }, 3000);
+        socket.on('chamar_painel', atualizar);
+        setInterval(async () => { try { let res = await fetch('/api/estado'); let data = await res.json(); atualizar(data.senha_atual); } catch(e) {} }, 3000);
     </script>
 </body></html>
 """
 
+# --- HTML ATENDENTE ---
 HTML_ATENDENTE = """
 <!DOCTYPE html>
-<html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>{{ css|safe }}</head>
+<html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>""" + CSS + """</head>
 <body>
     <div class="container">
-        <h2>Controle</h2>
-        <div style="display:flex; gap:20px; margin-bottom: 2rem;">
-            <div style="flex:1; background:#f1f5f9; padding:20px; border-radius:1rem;">NORMAL: <b id="n">0</b></div>
-            <div style="flex:1; background:#f1f5f9; padding:20px; border-radius:1rem;">PREF: <b id="p" style="color:#2563eb;">0</b></div>
+        <h2 style="margin-bottom:2rem;">Painel do Atendente</h2>
+        <div style="display:flex; gap:20px; margin-bottom:2.5rem;">
+            <div style="flex:1; background:#f1f5f9; padding:20px; border-radius:1.5rem;">NORMAL: <b id="n" style="font-size:2rem;">0</b></div>
+            <div style="flex:1; background:#f1f5f9; padding:20px; border-radius:1.5rem;">PREF: <b id="p" style="font-size:2rem; color:var(--primary);">0</b></div>
         </div>
-        <button class="btn" style="background:#f59e0b;" onclick="fetch('/api/chamar')">📢 CHAMAR PRÓXIMO</button>
+        <button class="btn" style="background:#f59e0b; box-shadow: 0 5px 0 #d97706;" onclick="fetch('/api/chamar')">📢 CHAMAR PRÓXIMO</button>
     </div>
     <script>
         var socket = io();
-        socket.on('atualizar_fila', data => { document.getElementById('p').innerText = data.preferencial.length; document.getElementById('n').innerText = data.normal.length; });
-        setInterval(async () => { try { let res = await fetch('/api/estado'); let data = await res.json(); document.getElementById('p').innerText = data.fila.preferencial.length; document.getElementById('n').innerText = data.fila.normal.length; } catch(e) {} }, 2000);
+        socket.on('atualizar_fila', d => { document.getElementById('n').innerText = d.normal.length; document.getElementById('p').innerText = d.preferencial.length; });
+        setInterval(async () => { try { let res = await fetch('/api/estado'); let data = await res.json(); document.getElementById('n').innerText = data.fila.normal.length; document.getElementById('p').innerText = data.fila.preferencial.length; } catch(e) {} }, 2000);
     </script>
 </body></html>
 """
 
+# --- LÓGICA DO SERVIDOR ---
+
 @app.route('/')
-def r_totem(): return render_template_string(HTML_TOTEM, css=CSS_MODERNO)
+def r_totem(): return render_template_string(HTML_TOTEM)
 
 @app.route('/painel')
-def r_painel(): return render_template_string(HTML_PAINEL, css=CSS_MODERNO)
+def r_painel(): return render_template_string(HTML_PAINEL)
 
 @app.route('/atendente')
-def r_atendente(): return render_template_string(HTML_ATENDENTE, css=CSS_MODERNO)
+def r_atendente(): return render_template_string(HTML_ATENDENTE)
 
 @app.route('/api/estado')
 def api_estado(): return jsonify({"fila": fila, "senha_atual": ultima_senha})
@@ -157,11 +163,13 @@ def api_gerar():
     num = contadores[t]
     s = f"{'N' if t == 'normal' else 'P'}-{num:02d}"
     fila[t].append(s)
-    tipo_txt = "Atendimento Normal" if t == 'normal' else "Atendimento Preferencial"
+    tipo_ext = "Normal" if t == 'normal' else "Preferencial"
+    
     if contadores[t] >= 100: contadores[t] = 1
     else: contadores[t] += 1
+    
     socketio.emit('atualizar_fila', fila, broadcast=True)
-    return jsonify({"status": "ok", "senha": s, "numero": num, "tipo_extenso": tipo_txt})
+    return jsonify({"status": "ok", "senha": s, "numero": num, "tipo_extenso": tipo_ext})
 
 @app.route('/api/chamar')
 def api_chamar():
